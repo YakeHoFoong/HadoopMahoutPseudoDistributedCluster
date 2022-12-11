@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: © 2021 Yake Ho Foong
+# SPDX-License-Identifier: BSD-3-Clause
+
+---
+# Usernames and passwords
+# Key is username and item is password hash from mkpasswd --method=sha-512
+# First one must be Hadoop 3.3.1, while second one must be for Mahoot 0.90, which requires Hadoop 1.3.1
+big_data_users:
+  hadoop331:
+    user_name: hadoop331
+    password_hash: $6$nGk0qT2ONarx.il$fM57NUaAQSojPYm43aap1EfXd/uxUp5dJGvnJYoLkByPoxOx93pcAs0V2ZnobQtpUZD8RAyphKQIR44SegB7p0
+  mahout09:
+    user_name: mahout09
+    password_hash: $6$nGk0qT2ONarx.il$fM57NUaAQSojPYm43aap1EfXd/uxUp5dJGvnJYoLkByPoxOx93pcAs0V2ZnobQtpUZD8RAyphKQIR44SegB7p0
+
+# The temporary directory into which Hadoop and Mahout will be downloaded for setup.
+download_dir: /tmp

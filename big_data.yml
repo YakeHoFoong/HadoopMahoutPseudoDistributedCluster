@@ -1,0 +1,385 @@
+# SPDX-FileCopyrightText: © 2021 Yake Ho Foong
+# SPDX-License-Identifier: BSD-3-Clause
+
+---
+- hosts: 127.0.0.1
+  connection: local
+  become: true
+
+  vars_files:
+    - vars.yml
+ 
+
+  pre_tasks:
+    - name: Update apt cache if needed
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+    - name: Make sure sudo group exists
+      group:
+        name: sudo
+        state: present
+
+
+  tasks:
+    - name: Remove the package "openssh-server" because reinstall is needed for Windows WSL2
+      apt:
+        name: openssh-server
+        state: absent
+        purge: yes
+
+    - name: (Re-)Install the package "openssh-server"
+      apt:
+        name: openssh-server
+        state: present
+
+    - name: Install Java OpenJDK 11
+      apt:
+        name: openjdk-11-jdk
+        state: present
+
+    - name: Install the package unzip
+      apt:
+        name: unzip
+        state: present
+
+    - name: Create a login ID for each of our big data users
+      user:
+        name: "{{ item.value.user_name }}"
+        password: "{{ item.value.password_hash }}"  # Hash of your password from mkpasswd --method=sha-512
+        state: present
+        groups: sudo
+        shell: /bin/bash
+        system: no
+        createhome: yes
+        home: "/home/{{ item.value.user_name }}"
+      with_dict: "{{ big_data_users }}"
+
+    - name: Ensure .ssh folder exists for each of our big data users
+      file:
+        path: "/home/{{ user_name }}/.ssh"
+        owner: "{{ user_name }}"
+        state: directory
+      vars:
+        user_name: "{{ item.value.user_name }}"
+      with_dict: "{{ big_data_users }}"
+
+    - name: Generate an OpenSSH keypair with ecdsa 521-bit for each of our big data users
+      openssh_keypair:
+        path: "/home/{{ user_name }}/.ssh/id_ecdsa"
+        owner: "{{ user_name }}"
+        size: 521
+        type: ecdsa
+      vars:
+        user_name: "{{ item.value.user_name }}"
+      with_dict: "{{ big_data_users }}"
+
+    - name: Set authorized key taken from file for each of our big data users
+      authorized_key:
+        user: "{{ user_name }}"
+        state: present
+        key: "{{ lookup('file', file_name) }}"
+      vars:
+        user_name: "{{ item.value.user_name }}"
+        file_name: "/home/{{ user_name }}/.ssh/id_ecdsa.pub"
+      with_dict: "{{ big_data_users }}"
+
+
+# Download Hadoop 1.2.1, Mahout 0.9 and Hadoop 3.3.1
+
+    - name: Download Hadoop 1.2.1
+      get_url:
+        url: https://archive.apache.org/dist/hadoop/core/hadoop-1.2.1/hadoop-1.2.1-bin.tar.gz
+        dest: "{{ download_dir }}/hadoop-1.2.1-bin.tar.gz"
+        checksum: sha512:5793DBB7410E479253AD412F855F531AD7E029937A764B41DFE1E339D6EA014F75AD08B8497FDA30D6AB623C83DBE87826750BE18BB2B96216A83B36F5095F1E
+
+    - name: Expand Hadoop 1.2.1 for mahout09 user
+      unarchive:
+        src: "{{ download_dir }}/hadoop-1.2.1-bin.tar.gz"
+        dest: "/home/{{ user_name }}"
+        remote_src: true
+        owner: "{{ user_name }}"
+        mode: u+rwx,o-rwx
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+
+    - name: Remove Hadoop 1.2.1 temporary files.
+      file:
+        path: "{{ download_dir }}/hadoop-1.2.1-bin.tar.gz"
+        state: absent
+
+
+    - name: Download Mahout 0.9
+      get_url:
+        url: http://archive.apache.org/dist/mahout/0.9/mahout-distribution-0.9.tar.gz
+        dest: "{{ download_dir }}/mahout-distribution-0.9.tar.gz"
+        checksum: sha1:b0d192a33dcc3f00439bf2ffbc313c6ef47510c3
+
+    - name: Expand Mahout 0.9 for mahout09 user.
+      unarchive:
+        src: "{{ download_dir }}/mahout-distribution-0.9.tar.gz"
+        dest: "/home/{{ user_name }}"
+        remote_src: true
+        owner: "{{ user_name }}"
+        mode: u+rwx,o-rwx
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+
+    - name: Remove Mahout 0.9 temporary files.
+      file:
+        path: "{{ download_dir }}/mahout-distribution-0.9.tar.gz"
+        state: absent
+
+
+    - name: Download Hadoop 3.3.1
+      get_url:
+        url: https://archive.apache.org/dist/hadoop/core/hadoop-3.3.1/hadoop-3.3.1.tar.gz
+        dest: "{{ download_dir }}/hadoop-3.3.1.tar.gz"
+        checksum: sha512:2fd0bf74852c797dc864f373ec82ffaa1e98706b309b30d1effa91ac399b477e1accc1ee74d4ccbb1db7da1c5c541b72e4a834f131a99f2814b030fbd043df66
+
+    - name: Expand Hadoop 3.3.1 for hadoop331 user
+      unarchive:
+        src: "{{ download_dir }}/hadoop-3.3.1.tar.gz"
+        dest: "/home/{{ user_name }}"
+        remote_src: true
+        owner: "{{ user_name }}"
+        mode: u+rwx,o-rwx
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+    - name: Remove Hadoop 3.3.1  temporary files.
+      file:
+        path: "{{ download_dir }}/hadoop-3.3.1.tar.gz"
+        state: absent
+
+
+# Update bash files
+
+    - name: Insert lines into mahout09 user .bashrc
+      blockinfile:
+        path: "/home/{{ big_data_users['mahout09'].user_name }}/.bashrc"
+        insertafter: "EOF"
+        block: |
+          export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64/
+          export HADOOP_PREFIX=~/hadoop-1.2.1
+          export HADOOP_INSTALL=$HADOOP_PREFIX
+          export HADOOP_MAPRED_HOME=$HADOOP_PREFIX
+          export HADOOP_COMMON_HOME=$HADOOP_PREFIX
+          export HADOOP_HDFS_HOME=$HADOOP_PREFIX
+          export HADOOP_YARN_HOME=$HADOOP_PREFIX
+          export YARN_HOME=$HADOOP_PREFIX
+          export HADOOP_COMMON_LIB_NATIVE_DIR=$HADOOP_PREFIX/lib/native
+          export PATH=$PATH:$HADOOP_PREFIX/sbin:$HADOOP_PREFIX/bin
+          export HADOOP_OPTS="-Djava.library.path=$HADOOP_PREFIX/lib/native"
+          export HADOOP_CONF_DIR=$HADOOP_INSTALL/conf
+          export MAHOUT_HOME=~/mahout-distribution-0.9
+          export PATH=$PATH:$MAHOUT_HOME/bin
+
+    - name: Update line in Hadoop 3.3.1 hadoop-env.sh
+      lineinfile:
+        path: "/home/{{ big_data_users['mahout09'].user_name }}/hadoop-1.2.1/conf/hadoop-env.sh"
+        search_string: "export JAVA_HOME=/usr/lib"
+        state: present
+        line: export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64/
+
+
+    - name: Insert lines into hadoop331 user .bashrc
+      blockinfile:
+        path: "/home/{{ big_data_users['hadoop331'].user_name }}/.bashrc"
+        insertafter: "EOF"
+        block: |
+          export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64/
+          export HADOOP_HOME=~/hadoop-3.3.1
+          export HADOOP_INSTALL=$HADOOP_HOME
+          export HADOOP_MAPRED_HOME=$HADOOP_HOME
+          export HADOOP_COMMON_HOME=$HADOOP_HOME
+          export HADOOP_HDFS_HOME=$HADOOP_HOME
+          export HADOOP_YARN_HOME=$HADOOP_HOME
+          export YARN_HOME=$HADOOP_HOME
+          export HADOOP_COMMON_LIB_NATIVE_DIR=$HADOOP_HOME/lib/native
+          export PATH=$PATH:$HADOOP_HOME/sbin:$HADOOP_HOME/bin
+          export HADOOP_OPTS="-Djava.library.path=$HADOOP_HOME/lib/native"
+
+    - name: Update line in Hadoop 3.3.1 hadoop-env.sh
+      lineinfile:
+        path: "/home/{{ big_data_users['hadoop331'].user_name }}/hadoop-3.3.1/etc/hadoop/hadoop-env.sh"
+        search_string: "export JAVA_HOME=/usr/lib"
+        state: present
+        line: export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64/
+
+
+# Create Hadoop folders
+
+    - name: Create folders for Hadoop 1.2.1 namenode, datanode and temp
+      file:
+        path: "/home/{{ user_name }}/{{ item }}"
+        state: directory
+        owner: "{{ user_name }}"
+        mode: u+rw,o-rwx
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+      with_items:
+        - hadoopdata/hdfs/namenode
+        - hadoopdata/hdfs/datanode
+        - hadoopdata/hdfs/tmpdata
+
+
+    - name: Create folders for Hadoop 3.3.1 namenode, datanode and temp
+      file:
+        path: "/home/{{ user_name }}/{{ item }}"
+        state: directory
+        owner: "{{ user_name }}"
+        mode: u+rw,o-rwx
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+      with_items:
+        - hadoopdata/hdfs/namenode
+        - hadoopdata/hdfs/datanode
+        - hadoopdata/hdfs/tmpdata
+
+
+# Hadoop 1.2.1 XML configurations
+
+    - name: Insert lines into mahout09 user Hadoop 1.2.1 configuration core-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-1.2.1/conf/core-site.xml"
+        xpath: "/configuration/property[name[text()='hadoop.tmp.dir']]/value"
+        value: "/home/{{ user_name }}/hadoopdata/hdfs/tmpdata"
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+
+    - name: Insert lines into mahout09 user Hadoop 1.2.1 configuration core-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-1.2.1/conf/core-site.xml"
+        xpath: "/configuration/property[name[text()='fs.default.name']]/value"
+        value: "hdfs://127.0.0.1:9000"
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+
+
+    - name: Insert lines into mahout09 user Hadoop 1.2.1 configuration hdfs-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-1.2.1/conf/hdfs-site.xml"
+        xpath: "/configuration/property[name[text()='dfs.namenode.name.dir']]/value"
+        value: "/home/{{ user_name }}/hadoopdata/hdfs/namenode"
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+
+    - name: Insert lines into mahout09 user Hadoop 1.2.1 configuration hdfs-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-1.2.1/conf/hdfs-site.xml"
+        xpath: "/configuration/property[name[text()='dfs.datanode.data.dir']]/value"
+        value: "/home/{{ user_name }}/hadoopdata/hdfs/datanode"
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+
+    - name: Insert lines into mahout09 user Hadoop 1.2.1 configuration hdfs-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-1.2.1/conf/hdfs-site.xml"
+        xpath: "/configuration/property[name[text()='dfs.replication']]/value"
+        value: "1"
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+
+
+    - name: Insert lines into mahout09 user Hadoop 1.2.1 configuration mapred-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-1.2.1/conf/mapred-site.xml"
+        xpath: "/configuration/property[name[text()='mapred.job.tracker']]/value"
+        value: "localhost:9001"
+      vars:
+        user_name: "{{ big_data_users['mahout09'].user_name }}"
+
+
+# Hadoop 3.3.1 XML configurations
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration core-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/core-site.xml"
+        xpath: "/configuration/property[name[text()='hadoop.tmp.dir']]/value"
+        value: "/home/{{ user_name }}/hadoopdata/hdfs/tmpdata"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration core-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/core-site.xml"
+        xpath: "/configuration/property[name[text()='fs.default.name']]/value"
+        value: "hdfs://127.0.0.1:9000"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration hdfs-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/hdfs-site.xml"
+        xpath: "/configuration/property[name[text()='dfs.name.dir']]/value"
+        value: "/home/{{ user_name }}/hadoopdata/hdfs/namenode"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration hdfs-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/hdfs-site.xml"
+        xpath: "/configuration/property[name[text()='dfs.data.dir']]/value"
+        value: "/home/{{ user_name }}/hadoopdata/hdfs/datanode"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration hdfs-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/hdfs-site.xml"
+        xpath: "/configuration/property[name[text()='dfs.replication']]/value"
+        value: "1"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration mapred-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/mapred-site.xml"
+        xpath: "/configuration/property[name[text()='mapreduce.framework.name']]/value"
+        value: "yarn"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration yarn-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/yarn-site.xml"
+        xpath: "/configuration/property[name[text()='yarn.nodemanager.aux-services']]/value"
+        value: "mapreduce_shuffle"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration yarn-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/yarn-site.xml"
+        xpath: "/configuration/property[name[text()='yarn.nodemanager.aux-services.mapreduce.shuffle.class']]/value"
+        value: "org.apache.hadoop.mapred.ShuffleHandler"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration yarn-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/yarn-site.xml"
+        xpath: "/configuration/property[name[text()='yarn.resourcemanager.hostname']]/value"
+        value: "127.0.0.1"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration yarn-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/yarn-site.xml"
+        xpath: "/configuration/property[name[text()='yarn.acl.enable']]/value"
+        value: "0"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"
+
+    - name: Insert lines into hadoop331 user Hadoop 3.3.1 configuration yarn-site.xml
+      xml:
+        path: "/home/{{ user_name }}/hadoop-3.3.1/etc/hadoop/yarn-site.xml"
+        xpath: "/configuration/property[name[text()='yarn.nodemanager.env-whitelist']]/value"
+        value: "JAVA_HOME,HADOOP_COMMON_HOME,HADOOP_HDFS_HOME,HADOOP_CONF_DIR,CLASSPATH_PERPEND_DISTCACHE,HADOOP_YARN_HOME,HADOOP_MAPRED_HOME"
+      vars:
+        user_name: "{{ big_data_users['hadoop331'].user_name }}"

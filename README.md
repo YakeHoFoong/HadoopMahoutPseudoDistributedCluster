@@ -55,7 +55,7 @@ $ start-all.sh
 And before logging off, always run:  
 $ stop-all.sh  
 Notice that for Hadoop 1.2.1, the file system commands are:  
+$ hdfs dfs -linux_command   
+$ hadoop fs -linux_command  
+whereas for Hadoop 3.3.1, the commands are:  
 $ hdfs dfs -linux_command  
-$ hadoop fs -linux_command
-whereas for Hadoop 3.3.1, the commands are:
-$ hdfs dfs -linux_command

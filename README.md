@@ -64,3 +64,6 @@ $ hdfs dfs -linux_command
 $ hadoop fs -linux_command  
 whereas for Hadoop 3.3.1, the commands are:  
 $ hdfs dfs -linux_command  
+
+## Example of how to automate Map Reduce shell commands in Python
+Refer to the file "cluster_analysis.py".
